@@ -1,0 +1,581 @@
+---
+title: "Probability of Default Predictor"
+author: "Agustin Daniel Ross"
+date: "8/3/2022"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+  
+# Introduction section: Project's goal and database used.
+This is a project based on the creation of a code that intends to estimate the probability of default for a financial entity's client (the probability of not paying a credit card debt). To do this, I borrowed a small data sample from an Argentinian financial entity I work in. In this paper will be shown the different methods and models that have been tested and select the best of them in the mention case of study.  
+
+```{r Loading of packages and data, echo=FALSE, message=FALSE, warning=FALSE}
+#############################################################
+#Load Packages
+library(corrplot)
+library(tidytable)
+library(readxl)
+library(plyr)
+library(dplyr)
+library(car)
+library(stats)
+library(reshape)
+library(lmtest)
+library(Rsolnp)
+library(openxlsx)
+library(memisc)
+library(foreign)
+library(ROCR)
+library(InformationValue)
+library(pscl)
+library(MASS)
+library(ggplot2)
+library(ggthemes)
+library(rpart)
+library(partykit)
+library(nnet)
+library(tinytex)
+# I set the path.
+DB_path <- "https://raw.githubusercontent.com/agustinross/Capstone_Harvard/main/Choose_Your_Own_database.xlsx"
+
+# Then, I get the data.
+DataBase <- as.data.frame(read.xlsx(DB_path))
+
+
+```
+
+## Exploratory analysis: understanding the data.
+As it was told, the data is a sample taken from an Argentinian financial entity. It has `r ncol(DataBase)` columns, eleven independent variables (X) and one dependent (Y). The dependent variable is a flag that shows if the person has paid the credit card debt or not, it is a binary variable (0 = Debt paid, 1 = Debt not paid, default). Also, it contains `r nrow(DataBase)` observations, this means it has information from `r nrow(DataBase)` people. The data from the independent variables is a picture taken on January 2021, and the Default / No Default flag shows the payment behavior of this people during all the 2021. If a person has a delay in his payment for more than 90 days, the flag is activated (Default = 1), this situation is an absorbing state, once you are flagged (in this specific database) with Default = 1, you can not take off the mark.
+
+## Variables Analysis.
+### Univariate Analysis.
+Let's start with the analysis of the independent variables so we can understand them better. To study the distribution of the different variables I have used some histograms.:
+
+The first variable is "Commercial References", it shows the amount of times the person under analysis did not pay some expenses like electricity and cellphone bills (here in Argentina you can buy this type of information). This is its histogram:
+
+```{r Transformation of the variable - 1 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((DataBase$CR))
+```
+
+
+The majority of the observations are distributed around the "0", as expected.
+
+-
+
+The second variable is "Quantity of credit cards the person owns". This is its histogram:
+
+
+```{r Transformation of the variable - 2 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((DataBase$QCC))
+```
+
+
+As expected, the distribution of the variable is also around "0".
+
+-
+
+The third variable is a very interesting one, it is "Basic Needs". It shows the percentage of basic needs that are covered in the region the person lives (it can be a huge indicator for the good or bad behavior in payments).  This is its histogram:
+
+
+```{r Transformation of the variable - 3 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((DataBase$BN))
+```
+
+
+It is distributed around `r mean(DataBase$BN)` (its mean). We can also see a low variance, and it is almost impossible to find an observation below the 60 points. In this case, it could be suitable to standardize the variable, so I subtracted  the mean and divided by the SD. Here is the new histogram:
+
+```{r Transformation of the variable - 4, echo=FALSE, message=FALSE, warning=FALSE}
+BN_Stand <- (BN_Stand=((DataBase$BN-mean(DataBase$BN))/sd(DataBase$BN)))
+
+```
+
+
+
+```{r Transformation of the variable - 5 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((BN_Stand))
+```
+
+
+Now it is distributed around "0".
+
+-
+
+The fourth variable is "Age". This is its histogram:
+
+
+```{r Transformation of the variable - 6 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((DataBase$Age))
+```
+
+
+Since this is supposed to apply to people that are not underage, I truncated the data to 18 years old. It also can be seen how we have just a few observations over the 80 years old, so it could be appropriated to truncated it to 80. We can also see that the data has high variance and it doesn't seem to be normally distributed. So, I proceeded to apply the LN function to try to catch better the prediction power of the variable. Here is the new histogram:
+
+```{r Transformation of the variable - 7, echo=FALSE, message=FALSE, warning=FALSE}
+Age_LN <- (Age_LN=log(ifelse(DataBase$Age<18,18,DataBase$Age)-17))
+
+```
+
+
+
+```{r Transformation of the variable - 8 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((Age_LN))
+```
+
+
+-
+
+The fifth variable is the sector where the person work. PRIV = Private sector, PUB = Public sector , JUB = Retired person, UNIV = University teacher , RN = Worker for the state "Rio Negro"  in Argentina. This is its plot:
+
+
+```{r Transformation of the variable - 9 , warning=FALSE, character = TRUE, echo = FALSE}
+ggplot(as.data.frame(DataBase$Work), aes(x=reorder(DataBase$Work, DataBase$Work, function(x)-length(x)))) +
+  geom_bar(fill='grey') + labs(x='work sector')
+```
+
+-
+
+The sixth variable is the amount of money spent in Debit Card. This is its histogram:
+
+
+```{r Transformation of the variable - 10 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((DataBase$DC))
+```
+
+
+Since this is a variable in money units, it could be appropriated to apply LN function here, it should make the distribution of the variable more normal. This is the new histogram:
+
+```{r Transformation of the variable - 11, echo=FALSE, message=FALSE, warning=FALSE, echo = FALSE}
+DC_LN <- (DC_LN=log(ifelse(DataBase$DC<1,1,DataBase$DC)))
+
+```
+
+
+```{r Transformation of the variable - 12, warning=FALSE, character = TRUE, echo = FALSE}
+hist((DC_LN))
+```
+
+
+-
+
+The seventh variable is Monthly Expenses. This is its histogram:
+
+
+
+```{r Transformation of the variable - 13 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((DataBase$ME))
+```
+
+
+Same as DebitCard, I applied LN function. This is the new histogram:
+
+```{r Transformation of the variable - 14, echo=FALSE, message=FALSE, warning=FALSE, echo = FALSE}
+ME_LN <- (ME_LN=log(ifelse(DataBase$ME<1,1,DataBase$ME)))
+
+```
+
+
+```{r Transformation of the variable - 15 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((ME_LN))
+```
+
+
+-
+
+The eighth variable is Wage, this is a very important variable to estimate Default. This is its histogram:
+
+
+```{r Transformation of the variable - 16 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((DataBase$Wage))
+```
+
+
+With the same logic as before, I applied the LN function. This is the new histogram:
+
+```{r Transformation of the variable -  17, echo=FALSE, message=FALSE, warning=FALSE, echo = FALSE}
+Wage_LN <- (Wage_LN=log(ifelse(DataBase$Wage<1,1,DataBase$Wage)))
+
+```
+
+
+```{r Transformation of the variable - 18 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((Wage_LN))
+```
+
+
+-
+
+The ninth variable is a flag that shows if the person has used a passive product (like debit card) 12 months in a row. (It could be a good indicator of how much use the person gives to the bank's products). This is its histogram:
+
+
+```{r Transformation of the variable - 19 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((DataBase$M12_PP))
+```
+
+
+-
+
+The tenth variable is the limit the person has in his/her credit card in the financial sector in Argentina. This is its histogram:
+
+
+```{r Transformation of the variable - 20 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((DataBase$CCLim))
+```
+
+
+I applied the LN function. This is the new histogram:
+
+```{r Transformation of the variable - 21, echo=FALSE, message=FALSE, warning=FALSE}
+CCLim_LN <- (CCLim_LN=log(ifelse(DataBase$CCLim<1,1,DataBase$CCLim)))
+```
+
+```{r Transformation of the variable - 22 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((CCLim_LN))
+```
+
+
+-
+
+The last variable is Interest, and it shows the amount of interest (it could be in fix rent) the person won the last year. This is its histogram:
+
+
+```{r Transformation of the variable - 23 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((DataBase$I))
+```
+
+
+With the same logic as before, I applied LN function. This is the new histogram:
+
+```{r Transformation of the variable - 24, echo=FALSE, message=FALSE, warning=FALSE}
+I_LN <- (I_LN=log(ifelse(DataBase$I<1,1,DataBase$I)))
+```
+
+```{r Transformation of the variable - 25 , warning=FALSE, character = TRUE, echo = FALSE}
+hist((I_LN))
+```
+
+
+We have seen the distribution of all the variables. It was also shown how, on some particular cases, a transformation was applied, this was done trying to capture better the prediction power of the variables.
+
+```{r Transformation of the dataset, echo=FALSE, message=FALSE, warning=FALSE}
+DataBase <- cbind(DataBase, BN_Stand, Age_LN, I_LN, DC_LN, ME_LN, CCLim_LN ,Wage_LN)
+DataBase <- DataBase[,-c(which(colnames(DataBase) %in% c("BN","Age","DC","ME","Wage", "I", "CCLim")))]
+```
+
+## Bivariate Analysis
+
+Let's start now with the bivariate analysis. Here I compared the independent variables with each other and with the dependent variable.
+
+First, it would be interesting to see how well the independent variables explains the dependent one individually. To do this let's introduce the performance metrics that are commonly used to test this types of models: KS and AUC-ROC.
+
+- KS: The Kolmogorov–Smirnov statistic quantifies a distance between the empirical distribution function of the sample and the cumulative distribution function of the reference distribution. The rule is: bigger the number of KS, the better the model. Commonly, a KS of 50 points or more can be reference of a good model.
+
+- AUC-ROC: The ROC curve is created by plotting the true positive rate (TPR) against the false positive rate (FPR) at various threshold settings. The true-positive rate is also known as sensitivity, recall or probability of detection. The false-positive rate is also known as probability of false alarm. The area under the curve (AUC) is a performance measurement for the classification problems at various threshold settings. Like the KS statistic, the rule is: the bigger the number of KS, the better the model. Commonly, a AUC-ROC of 80 points or more can be reference of a good model.
+
+Let's proceed now to create a univariate logistic regression model for each independent variable vs the dependent variable. The KS's and AUC-ROC's results of each model are shown below:
+
+```{r bivariate analysis, echo=FALSE, message=FALSE, warning=FALSE}
+for (i in 2:length(DataBase)) {
+  
+  bivariate_regression <- glm(DataBase[,1] ~ 1+ DataBase[,i], family = "binomial")
+  prediction <- predict(bivariate_regression, DataBase, type = "response")
+  
+  m1_pred <- prediction(prediction , DataBase$Default)
+  m1_perf <- performance(m1_pred,"tpr","fpr")
+  
+  KS <- round(max(attr(m1_perf,'y.values')[[1]]-
+                    attr(m1_perf,'x.values')[[1]])*100, 2)
+  ROC <- round(performance(m1_pred, measure =
+                             "auc")@y.values[[1]]*100, 2)
+  
+  assign(paste0("KS_",colnames(DataBase[i])),KS,.GlobalEnv)
+  assign(paste0("ROC_",colnames(DataBase[i])),ROC,.GlobalEnv)
+  
+}
+
+# Let's unify the results
+KSs <- data.frame("varaible"=c("KS_Wage_LN","KS_CR","KS_QCC","KS_DC_LN","KS_Age_LN","KS_BN_Stand","KS_ME_LN","KS_Work","KS_I_LN","KS_M12_PP","KS_CCLim_LN"),"KS"=c(KS_Wage_LN,KS_CR,KS_QCC,KS_DC_LN,KS_Age_LN,KS_BN_Stand,KS_ME_LN,KS_Work,KS_I_LN,KS_M12_PP,KS_CCLim_LN))
+ROCs <- data.frame("variable"=c("ROC_Wage_LN","ROC_CR","ROC_QCC","ROC_DC_LN","ROC_Age_LN","ROC_BN_Stand","ROC_ME_LN","ROC_Work","ROC_I_LN","ROC_M12_PP","ROC_CCLim_LN"),"AUC-ROC"=c(ROC_Wage_LN,ROC_CR,ROC_QCC,ROC_DC_LN,ROC_Age_LN,ROC_BN_Stand,ROC_ME_LN,ROC_Work,ROC_I_LN,ROC_M12_PP,ROC_CCLim_LN))
+rm(KS_Wage_LN,KS_CR,KS_QCC,KS_DC_LN,KS_Age_LN,KS_BN_Stand,KS_ME_LN,KS_Work,ROC_Wage_LN,ROC_CR,ROC_QCC,ROC_DC_LN,ROC_Age_LN,ROC_BN_Stand,ROC_ME_LN,ROC_Work,ROC_I_LN , KS_I_LN, ROC_M12_PP,KS_M12_PP, ROC_CCLim_LN,KS_CCLim_LN, prediction, m1_perf, m1_pred, bivariate_regression, KS, ROC)
+
+```
+
+```{r KSs, echo=FALSE, message=TRUE, warning=FALSE, character =TRUE}
+KSs
+
+```
+
+```{r ROCs, echo=FALSE, message=TRUE, warning=FALSE, character =TRUE}
+ROCs
+
+```
+
+
+It can be seen how "M12_PP" and "I" have a nearly 0 KS and nearly 50 ROC. It means they do not explain anything of the dependent variable, so I proceed to eliminate them from the database.
+
+```{r Transformation of the variable, echo=FALSE, message=FALSE, warning=FALSE}
+DataBase <- DataBase[,-c(which(colnames(DataBase) %in% c("M12_PP", "I")))]
+
+```
+
+
+Let's now proceed to make a correlation plot to study correlations between the variables. To do this, I excluded the "Work" variable because it is a "factor" variable. 
+
+```{r work exclution, echo=FALSE, message=FALSE, warning=FALSE}
+factor_variable <- c("Work")
+DataBase_withoutFactor <- DataBase[,-c(which(colnames(DataBase) %in% factor_variable))]
+Mat_cor <- round(cor(DataBase_withoutFactor),2)
+```
+  
+
+```{r corrplot, echo=FALSE, message=FALSE, warning=FALSE, character = TRUE}
+corrplot(Mat_cor, method="color",
+         type="upper",
+         addcoef.col = "black", # Add coefficient of correlation
+         tl.col="black", tl.srt=45, #Text label color and rotation
+         # Combine with significance
+         #p.mat = p.mat$p, sig.level = 0.01, insig = "blank",
+         # hide correlation coefficient on the principal diagonal
+         diag=FALSE
+)
+
+
+```
+
+There is not a strong correlation between independent variables.
+
+```{r delete aux, echo=FALSE, message=FALSE, warning=FALSE}
+rm(factor_variable,DataBase_withoutFactor, Mat_cor)
+```
+
+
+## Multivariate models
+
+Let's now start with the different models that will be tested. I have tested 6 different models:
+
+1_ Linear Regression with the intercept only
+
+2_ Multivariate Linear Regression
+
+3_ Logistic Regression with the intercept only
+
+4_ Multivariate Logistic Regression
+
+5_ Decision tree
+
+6_ Neural Network
+
+First of all, it is necessary to transform the factor variable into dummies and to divide the database between train and test
+
+```{r Preparin the dataset, warning=FALSE, character = TRUE, echo = TRUE}
+# First, I have to convert to dummies the factor variable
+factor_variable <- "Work"
+DataBase_wDummies <- as.data.frame(get_dummies.(DataBase))
+DataBase_wDummies <- DataBase_wDummies[,-c(which(colnames(DataBase_wDummies) == "Work"))]
+
+
+# Then, I set a seed
+seed = 1
+set.seed(seed)
+
+# I divided the database between train and test.
+Muestra = 0.8
+Coord = sample(nrow(DataBase_wDummies),nrow(DataBase_wDummies)*Muestra)
+Test = DataBase_wDummies[-Coord,]
+Train = DataBase_wDummies[Coord,]
+
+```
+
+### 1ST MODEL: LINEAR MODEL - Intercept Only
+
+```{r Model 1, warning=FALSE, character = TRUE}
+Model_Linear_null <- glm(Default ~ 1, data=Train)
+
+# With the created model, I estimated the estimated probability of default
+Prob_est_null <- predict(Model_Linear_null,
+                              Test,type = 'response')
+
+# Then I calculated the KS and the ROC
+m1_pred_null <- prediction(Prob_est_null , Test$Default )
+m1_perf_null <- performance(m1_pred_null,"tpr","fpr")
+KS_lm_null <- round(max(attr(m1_perf_null,'y.values')[[1]]-
+                          attr(m1_perf_null,'x.values')[[1]])*100, 2)
+ROC_lm_null <- round(performance(m1_pred_null, measure =
+                                   "auc")@y.values[[1]]*100, 2)
+
+KS_lm_null
+ROC_lm_null
+```
+
+This model does not explain the default. A KS = 0 and a ROC = 50 are similar to an aleatory decision between default and no default.
+
+### 2ND MODEL: MULTIVARIATE LINEAR MODEL
+
+```{r Model 2, warning=FALSE, character = TRUE}
+
+Model_Linear <- lm(Default ~ 1 +  . ,data = Train)
+
+Prob_est <- predict(Model_Linear,
+                         Test,type = 'response')
+m1_pred <- prediction(Prob_est , Test$Default )
+m1_perf <- performance(m1_pred,"tpr","fpr")
+KS_lm <- round(max(attr(m1_perf,'y.values')[[1]] -
+                     attr(m1_perf,'x.values')[[1]])*100, 2)
+ROC_lm <- round(performance(m1_pred, measure =
+                              "auc")@y.values[[1]]*100, 2)
+
+KS_lm 
+ROC_lm 
+```
+
+This model is much better than the one with only the intercept. Let's try to improve it with a logistic.
+
+### 3RD MODEL: LOGISTIC REGRESSION - Intercept Only
+
+```{r Model 3, warning=FALSE, character = TRUE}
+Model_Logistic_null <- glm(Default ~ 1, data=Train, family = "binomial")
+
+Prob_est_null <- predict(Model_Logistic_null,
+                              Test,type = 'response')
+m1_pred_null <- prediction(Prob_est_null , Test$Default )
+m1_perf_null <- performance(m1_pred_null,"tpr","fpr")
+
+KS_glmL_null <- round(max(attr(m1_perf_null,'y.values')[[1]]-
+                            attr(m1_perf_null,'x.values')[[1]])*100, 2)
+ROC_glmL_null <- round(performance(m1_pred_null, measure =
+                                     "auc")@y.values[[1]]*100, 2)
+
+KS_glmL_null
+ROC_glmL_null
+```
+
+The same as the first one, a model with only an intercept does not explain the default.
+
+### 4TH MODEL: MULTIVARIATE LOGISTIC MODEL
+
+```{r Model 4, warning=FALSE, character = TRUE}
+Model_Logistic <- glm(Default ~ 1 +  . ,data = Train , family = "binomial")
+
+Prob_est <- predict(Model_Logistic,
+                         Test,type = 'response')
+m1_pred <- prediction(Prob_est , Test$Default )
+m1_perf <- performance(m1_pred,"tpr","fpr")
+KS_glmL_log <- round(max(attr(m1_perf,'y.values')[[1]]-
+                           attr(m1_perf,'x.values')[[1]])*100, 2)
+ROC_glmL_log <- round(performance(m1_pred, measure =
+                                    "auc")@y.values[[1]]*100, 2)
+
+KS_glmL_log 
+ROC_glmL_log
+```
+
+Here we can see how the logistic model improves the linear one. This is mainly because the dependent  variable is binary and the logistic model applies much better in these cases.
+
+An extra analysis could be to take a look at the p-values of the variables:
+
+```{r P-Values, warning=FALSE, character = TRUE}
+pvalue <- as.data.frame(summary(Model_Logistic)$coefficients)
+pvalue <- pvalue[order(pvalue$`Pr(>|z|)`),]
+pvalue
+```
+
+Here we can see that all the p-values are quite small, so all the variables are significant to the model. 
+
+### 5TH MODEL: DECISION TREES
+
+```{r Model 5, warning=FALSE, character = TRUE}
+# Creation of the model
+tree<-rpart(Default~., Train)
+```
+
+Let's now see the performance of this model:
+
+```{r Performance tree, warning=FALSE, character = TRUE}
+Prob_estimada <- (predict(tree,Test,type = 'vector'))
+m1_pred <- prediction(as.numeric(Prob_estimada), as.numeric(Test$Default))
+m1_perf <- performance(m1_pred,"tpr","fpr")
+
+KS_tree <- round(max(attr(m1_perf,'y.values')[[1]]-attr(m1_perf,'x.values')[[1]])*100, 2)
+ROC_tree <- round(performance(m1_pred, measure ="auc")@y.values[[1]]*100, 2)
+
+KS_tree
+ROC_tree
+```
+
+The KS and the ROC are much higher with this model. It can discriminate very well the defaults.
+
+### 6TH MODEL: NEURAL NETWORK
+```{r Model 6 - package, warning=FALSE, message=FALSE, character =FALSE, echo=FALSE}
+
+# To create this model I use the neuralnet package
+library(neuralnet)
+
+
+```
+
+```{r Model 6, warning=FALSE, character = TRUE}
+
+# Set the formula to use
+formula <- as.formula(paste("Default ~ ."))
+
+
+# This model takes a while to run (2 or 3 minutes), so I added a timer
+t <- proc.time()  ; Modelo_Redes_prueba <- neuralnet(formula , hidden = c(3,3) ,data =
+                Train ,linear.output = FALSE, algorithm =
+                'rprop+',likelihood = TRUE,threshold = 0.5, stepmax = 100000) ;proc.time()-t
+
+```
+
+ Now, let's see the performance:
+
+```{r Performance neural network, warning=FALSE, character = TRUE}
+Variables <- Modelo_Redes_prueba$model.list$variables
+model_results3 <- neuralnet::compute(Modelo_Redes_prueba, Test[,c(which(colnames(Test) 
+                                                                        %in% Variables))])
+Prob_estimada <- as.vector(model_results3$net.result)
+detach(package:neuralnet,unload = T)
+m1_pred <- prediction(Prob_estimada , Test$Default)
+m1_perf <- performance(m1_pred,"tpr","fpr")
+KS_nn <- round(max(attr(m1_perf,'y.values')[[1]]-
+                     attr(m1_perf,'x.values')[[1]])*100, 2)
+ROC_nn <- round(performance(m1_pred, measure =
+                              "auc")@y.values[[1]]*100, 2)
+KS_nn
+ROC_nn
+
+```
+
+The neural network is a good model, as good as the logistic regression in this case. 
+
+## Resume and finals results:
+
+Let's analyze all models results at once:
+
+```{r Results, warning=FALSE, echo =FALSE}
+results <- data.frame("model"=c("Linear - only Intercept","Multivariate Linear", "Logistic - only Intercept", "Multivariate Logistic","Decision Tree","Neural Network"),"KS"=c(KS_lm_null,KS_lm,KS_glmL_null,KS_glmL_log,KS_tree,KS_nn),"ROC"=c(ROC_lm_null,ROC_lm,ROC_glmL_null,ROC_glmL_log,ROC_tree,ROC_nn))
+results
+
+```
+
+It could be appropriated to remind that a model with KS above 60 and ROC above 80 can be considered as a good one. A model with KS above 70 and AUC-ROC above 90 can be considered as a very good one.
+
+The model with the best KS is:
+
+```{r Best KS, warning=FALSE, echo=FALSE}
+results$model[which.is.max(results$KS)]
+
+```
+
+The model with the best AUC-ROC is:
+
+```{r Best ROC, warning=FALSE, echo=FALSE}
+results$model[which.is.max(results$ROC)]
+
+```
+
+
+## Conclusion 
+
+It can be concluded that the linear regression model is not suitable for this kind of project. In the other hand, the logistic regression, the neural networks and the decision trees are all good choices for the probability of default estimation. In this particular case, the decision tree was the model which best estimated this probability.
